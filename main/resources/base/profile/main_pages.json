@@ -1,0 +1,10 @@
+{
+  "src": [
+    "pages/LoginPage",
+    "pages/Index",
+    "pages/Two_KeepAccounts",
+    "pages/One_SelectAccounts",
+    "pages/Three_ShowAccounts",
+    "pages/EntryPage"
+  ]
+}
