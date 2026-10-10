@@ -65,3 +65,4 @@ entry/src/main/ets/
        "pages/Three_ShowAccounts"
      ]
    }**
+默认登录账号：admin，密码：123456
