@@ -1,56 +1,70 @@
 import { promptAction, router } from '@kit.ArkUI';
-import { kvStoreUtils } from '../common/KVStoreUtils';
-import { Top, TopBack } from '../components/top';
+import { TopBack } from '../components/top';
 import { Bill } from './Two_KeepAccounts';
+import { HttpUtil, BillDTO } from '../utils/HttpUtil';
 
-// 分组数据结构
 interface DayData {
   date: string;
   bills: Bill[];
   expense: number;
   income: number;
 }
-
-/**
- * 账单展示
- */
+/*
+ * 账本页面
+ * */
 @Entry
 @Component
 export struct Index_ShowAccounts {
   @State listData: Bill[] = []
-  @State dayDataList: DayData[] = [] // 存储分组后的数据
+  @State dayDataList: DayData[] = []
   @State PlanExpense: number = 1800
   @State totalExpense: number = 0
-  @State rivalExpense: number = this.PlanExpense - this.totalExpense
-  @State showBudgetInput: boolean = false // 是否显示预算输入框
-  @State tempBudget: string = '' // 临时预算输入值
+  @State rivalExpense: number = 1800
+  @State showBudgetInput: boolean = false
+  @State tempBudget: string = ''
 
   async aboutToAppear() {
     this.loadBudget()
-    kvStoreUtils.init(getContext())
-    kvStoreUtils.createKVStore().then(async () => {
-      this.getData(async (success: boolean, data: string) => {
-        if (success && data) {
-          console.log('获取到的数据:', data)
-          this.listData = JSON.parse(data) as Bill[]
-          this.processData()
-        } else {
-          this.listData = []
-          this.processData()
-        }
-      })
-    }).catch((err: Error) => {
-      console.error('KVStore初始化失败:', err)
-    })
+    await this.loadBillsFromServer()
   }
 
-  // 处理数据：分组并计算每日收支
+  async onPageShow() {
+    await this.loadBillsFromServer()
+  }
+
+  async loadBillsFromServer() {
+    try {
+      const res = await HttpUtil.get<BillDTO[]>('/api/bills')
+      if (res.code === 200) {
+        const rawList: BillDTO[] = res.data;
+        const mapped: Bill[] = [];
+        for (let i = 0; i < rawList.length; i++) {
+          const item = rawList[i];
+          const bill: Bill = {
+            text: item.text,
+            name: item.name,
+            price: Number(item.price),
+            imageName: item.imageName === undefined ? 'qt' : item.imageName,
+            isIncome: item.isIncome === 1,
+            date: (item.date === undefined ? '' : item.date).replace(/-/g, '.'),
+            createTime: item.createTime
+          };
+          mapped.push(bill);
+        }
+        this.listData = mapped;
+        this.processData();
+      }
+    } catch (err) {
+      console.error('加载账单失败:', JSON.stringify(err))
+    }
+  }
+
   processData() {
     const groups = new Map<string, Bill[]>()
     const expenseMap = new Map<string, number>()
     const incomeMap = new Map<string, number>()
 
-    this.listData.forEach(item => {
+    this.listData.forEach((item: Bill) => {
       const date = item.date
       if (!groups.has(date)) {
         groups.set(date, [])
@@ -59,7 +73,6 @@ export struct Index_ShowAccounts {
       }
       groups.get(date)!.push(item)
 
-      // 计算每日收支
       if (item.isIncome) {
         incomeMap.set(date, (incomeMap.get(date) || 0) + item.price)
       } else {
@@ -67,11 +80,10 @@ export struct Index_ShowAccounts {
       }
     })
 
-    // 转换为数组并排序
-    const sortedDates = Array.from(groups.keys()).sort((a, b) => b.localeCompare(a))
+    const sortedDates = Array.from(groups.keys()).sort((a: string, b: string) => b.localeCompare(a))
     const dayDataList: DayData[] = []
 
-    sortedDates.forEach(date => {
+    sortedDates.forEach((date: string) => {
       dayDataList.push({
         date: date,
         bills: groups.get(date) || [],
@@ -84,7 +96,6 @@ export struct Index_ShowAccounts {
     this.ComputeBill()
   }
 
-  // 读取保存的预算
   loadBudget() {
     try {
       const budget = AppStorage.get<number>('monthlyBudget')
@@ -97,18 +108,15 @@ export struct Index_ShowAccounts {
     }
   }
 
-  // 保存预算
   saveBudget() {
     AppStorage.setOrCreate('monthlyBudget', this.PlanExpense)
   }
 
-  // 修改预算 - 显示输入框
   editBudget() {
     this.tempBudget = this.PlanExpense.toString()
     this.showBudgetInput = true
   }
 
-  // 确认修改预算
   confirmBudget() {
     const newBudget = parseFloat(this.tempBudget)
     if (!isNaN(newBudget) && newBudget > 0) {
@@ -122,98 +130,84 @@ export struct Index_ShowAccounts {
     this.showBudgetInput = false
   }
 
-  // 取消修改预算
   cancelBudget() {
     this.showBudgetInput = false
   }
 
-  build() {
-    Stack({ alignContent: Alignment.End }) {
-      Column({ space: 5 }) {
-        this.CardPage()
-        this.ListPage()
+  // 从 "2026-10-15 17:34:19" 提取 "17:34"
+  formatTime(createTime?: string): string {
+    if (!createTime) return ''
+    const parts = createTime.split(' ')
+    if (parts.length === 2) {
+      const timeParts = parts[1].split(':')
+      if (timeParts.length >= 2) {
+        return `${timeParts[0]}:${timeParts[1]}`
       }
-      .width('100%')
-      .height('100%')
-      .backgroundColor('#FFF')
-      this.ButtonPage()
     }
+    return ''
   }
 
-  @Builder
-  ButtonPage() {
-    Row() {
-      Column(){
-        Image($r('app.media.refresh_'))
-          .objectFit(ImageFit.Fill)
-          .width('100%')
-          .height('100%')
-          .margin({
-            right:20,
-            top:-95
-          })
-          .onClick(() => {
-            promptAction.showToast({ message: '刷新完成', duration: 2000 });
-            this.onPageShow()
-          })
-      }
-        .height('100%')
-        .layoutWeight(1)
-
-        .backgroundColor('#fff')
-      .borderRadius(30)
-        .opacity(0.8)
+  build() {
+    Column({ space: 5 }) {
+      this.CardPage()
+      this.ListPage()
     }
-    .width(30)
-    .height(30)
+    .width('100%')
+    .height('100%')
+    .backgroundColor('#FFF')
   }
 
   @Builder
   ListPage() {
-    List({ space: 10 }) {
+    List({ space: 12 }) {
       ForEach(this.dayDataList, (dayData: DayData) => {
         ListItem() {
           Column() {
-            // 日期标题
             this.DateHeader(dayData)
-            // 当天账单列表
             this.DayBillsList(dayData.bills)
           }
-          .border({width:2,color:'#FFE0B2'})
           .width('100%')
           .backgroundColor('#FFFFFF')
-          .borderRadius(10)
-          .shadow({ radius: 2, color: '#00000010', offsetY: 1 })
+          .borderRadius(14)
+          .border({ width: 1.5, color: '#FFD59A' })
+          .shadow({ radius: 6, color: '#FF99071A', offsetY: 2 })
         }
       }, (dayData: DayData) => dayData.date)
     }
     .layoutWeight(1)
     .width('100%')
-    .padding(10)
+    .padding({ left: 12, right: 12, top: 8 })
   }
 
   @Builder
   DateHeader(dayData: DayData) {
     Row() {
-      Text(this.formatDateDisplay(dayData.date))
-        .fontSize(16)
-        .fontWeight(FontWeight.Bold)
-        .fontColor('#5C3B1F')
+      Row({ space: 6 }) {
+        // 主题色小圆点
+        Column()
+          .width(6)
+          .height(6)
+          .borderRadius(3)
+          .backgroundColor('#FF9907')
+        Text(this.formatDateDisplay(dayData.date))
+          .fontSize(15)
+          .fontWeight(FontWeight.Bold)
+          .fontColor('#5C3B1F')
+      }
 
       Blank()
 
-      Text(`支出: ¥${dayData.expense.toFixed(2)}`)
-        .fontSize(12)
-        .fontColor('#ffbe2727')
-
-      Text(`  收入: ¥${dayData.income.toFixed(2)}`)
-        .fontSize(12)
-        .fontColor('#fff8a402')
+      Text(`支出 ¥${dayData.expense.toFixed(2)}`)
+        .fontSize(11)
+        .fontColor('#E64A19')
+      Text(`  收入 ¥${dayData.income.toFixed(2)}`)
+        .fontSize(11)
+        .fontColor('#F5A623')
     }
     .width('100%')
-    .padding({ left: 12, right: 12, top: 12, bottom: 8 })
-    .backgroundColor('#FFF4E8')
-    .borderRadius({ topLeft: 10, topRight: 10 })
+    .padding({ left: 14, right: 14, top: 12, bottom: 10 })
+    .backgroundColor('#FFF9EE')
+    .borderRadius({ topLeft: 13, topRight: 13 })
   }
 
   @Builder
@@ -221,40 +215,58 @@ export struct Index_ShowAccounts {
     Column() {
       ForEach(bills, (item: Bill, index: number) => {
         this.BillItem(item, index === bills.length - 1)
-      }, (item: Bill, index: number) => item.name + item.date + index)
+        if (index < bills.length - 1) {
+          Divider()
+            .color('#FFF0D6')
+            .strokeWidth(1)
+            .margin({ left: 60, right: 14 })
+        }
+      }, (item: Bill, index: number) => item.name + (item.createTime || '') + index)
     }
     .width('100%')
     .backgroundColor('#FFFFFF')
-    .borderRadius({ bottomLeft: 10, bottomRight: 10 })
+    .borderRadius({ bottomLeft: 13, bottomRight: 13 })
   }
 
   @Builder
   BillItem(item: Bill, isLast: boolean) {
     Row() {
-      // 图标
+      // 圆形图标
       Column() {
         Image(this.getImageResource(item.imageName))
-          .width(28)
-          .height(28)
+          .width(26)
+          .height(26)
+          .fillColor('#FF9907')
       }
-      .width(40)
-      .height(40)
-      .backgroundColor('#FFE0A4')
+      .width(38)
+      .height(38)
+      .backgroundColor('#FFF3DE')
       .justifyContent(FlexAlign.Center)
       .alignItems(HorizontalAlign.Center)
-      .borderRadius(90)
+      .borderRadius(19)
 
-      // 信息
+      // 信息区
       Column({ space: 4 }) {
-        Text(item.text || '无备注')
+        Text(item.text || '其他')
           .fontSize(15)
           .fontWeight(FontWeight.Bold)
           .fontColor('#333333')
-        Text(item.name)
-          .fontSize(11)
-          .fontColor('#999999')
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+        Row() {
+          Text(item.name)
+            .fontSize(11)
+            .fontColor('#999999')
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1)
+
+          if (this.formatTime(item.createTime)) {
+            Text(this.formatTime(item.createTime))
+              .fontSize(10)
+              .fontColor('#C4C4C4')
+          }
+        }
+        .width('100%')
       }
       .layoutWeight(1)
       .margin({ left: 10 })
@@ -262,14 +274,13 @@ export struct Index_ShowAccounts {
 
       // 金额
       Text(item.isIncome ? `+${item.price.toFixed(2)}` : `-${item.price.toFixed(2)}`)
-        .fontSize(18)
+        .fontSize(17)
         .fontWeight(FontWeight.Bold)
-        .fontColor(item.isIncome ? '#fff8a402' : '#ffbe2727')
+        .fontColor(item.isIncome ? '#F5A623' : '#E64A19')
         .textAlign(TextAlign.End)
     }
     .width('100%')
-    .padding({ left: 12, right: 12, top: 10, bottom: 10 })
-    .borderRadius(isLast ? { bottomLeft: 10, bottomRight: 10 } : 0)
+    .padding({ left: 14, right: 14, top: 12, bottom: 12 })
   }
 
   formatDateDisplay(dateStr: string): string {
@@ -287,7 +298,6 @@ export struct Index_ShowAccounts {
       TopBack({ title: '账本' })
       Column({ space: 8 }) {
         if (this.showBudgetInput) {
-          // 显示输入框
           Row() {
             TextInput({ placeholder: '请输入预算', text: this.tempBudget })
               .type(InputType.Number)
@@ -319,7 +329,6 @@ export struct Index_ShowAccounts {
           .width('100%')
           .margin({ bottom: 5 })
         } else {
-          // 显示预算文字（可点击编辑）
           Row() {
             Text('本月预算  ')
               .fontSize(18)
@@ -373,45 +382,11 @@ export struct Index_ShowAccounts {
     let sum = 0;
     this.listData.forEach((item: Bill) => {
       if (!item.isIncome) {
-        sum += parseFloat(item.price.toString());
+        sum += Number(item.price)
       }
     });
     this.totalExpense = sum;
     this.rivalExpense = this.PlanExpense - this.totalExpense;
-  }
-
-  deleteItem(index: number) {
-    let newList = [...this.listData]
-    newList.splice(index, 1)
-    this.listData = newList
-    this.processData()
-    let jsonStr = JSON.stringify(newList)
-    kvStoreUtils.putData('keepAccountsKey', jsonStr)
-  }
-
-  onPageShow(): void {
-    this.getData((success: boolean, data: string) => {
-      if (success && data) {
-        console.log('获取到的数据:', data)
-        this.listData = JSON.parse(data) as Bill[]
-        this.processData()
-      } else {
-        this.listData = []
-        this.processData()
-      }
-    })
-  }
-
-  getData(result: (success: boolean, data: string) => void) {
-    kvStoreUtils.getData('keepAccountsKey', (data: boolean | string | number | Uint8Array) => {
-      if (data) {
-        result(true, data as string)
-      } else {
-        result(false, '')
-      }
-    }, (e: Error) => {
-      result(false, '')
-    })
   }
 
   getImageResource(imageName: string): Resource {
