@@ -1,36 +1,23 @@
-import { router, promptAction } from '@kit.ArkUI';
-import { kvStoreUtils } from '../common/KVStoreUtils';
+import { promptAction } from '@kit.ArkUI';
 import { KeepAccountsModel, TopBack } from '../components/top';
+import { HttpUtil, AddBillData, AddBillRequest } from '../utils/HttpUtil';
 
-
+/*
+ * 新增账单-记一笔
+ * */
 export interface Bill {
-  text: string,//类型
-  name: string,//备注
-  price: number,//金额
-  imageName: string,//类型照片
-  isIncome: boolean,//支出/收入
-  date:string
+  text: string,
+  name: string,
+  price: number,
+  imageName: string,
+  isIncome: boolean,
+  date: string,
+  createTime?: string
 }
 
 @Entry
 @Component
-export struct Two{
-  async  aboutToAppear() {
-    // 修改后的初始化逻辑
-    kvStoreUtils.init(getContext())
-    kvStoreUtils.createKVStore().then(() => {
-      console.log('KVStore初始化成功')
-    }).catch((err: Error) => {
-      console.error('KVStore初始化失败:', err)
-    })
-    this.getData(async(success: boolean, data: string)=>{
-      if (success && data) {
-        console.log('获取到的数据:', data)
-      } else {
-        console.log('no')
-      }
-    })
-  }
+export struct Two {
 
   expensesList: KeepAccountsModel[] = [
     { text: '吃', imageName: 'cy', icon: $r('app.media.cy') },
@@ -53,12 +40,10 @@ export struct Two{
 
   build() {
     Column({ space: 0 }) {
-      // 顶部标题栏
-      TopBack({title:'记一笔'})
+      TopBack({ title: '记一笔' })
 
-      // 中间主要内容区域 - 使用Flex布局
       Column({ space: 0 }) {
-        // 支出类型区域
+        // 支出类型
         Column({ space: 10 }) {
           Text('支出')
             .fontSize(16)
@@ -90,11 +75,7 @@ export struct Two{
               .padding({ top: 12, bottom: 12 })
               .backgroundColor(this.selectedExpensesIndex === index ? '#FFFFE0B2' : 'white')
               .borderRadius(10)
-              .shadow({
-                radius: 6,
-                color: 'rgba(0,0,0,0.4)',
-                offsetY: 2
-              })
+              .shadow({ radius: 6, color: 'rgba(0,0,0,0.4)', offsetY: 2 })
               .justifyContent(FlexAlign.Center)
               .alignItems(HorizontalAlign.Center)
               .onClick(() => {
@@ -110,7 +91,7 @@ export struct Two{
         .width('100%')
         .margin({ top: 30 })
 
-        // 收入类型区域
+        // 收入类型
         Column({ space: 10 }) {
           Text('收入')
             .fontSize(16)
@@ -142,11 +123,7 @@ export struct Two{
               .padding({ top: 12, bottom: 12 })
               .backgroundColor(this.selectedIncomeIndex === index ? '#FFFFE0B2' : 'white')
               .borderRadius(10)
-              .shadow({
-                radius: 6,
-                color: 'rgba(0,0,0,0.4)',
-                offsetY: 2
-              })
+              .shadow({ radius: 6, color: 'rgba(0,0,0,0.4)', offsetY: 2 })
               .justifyContent(FlexAlign.Center)
               .alignItems(HorizontalAlign.Center)
               .onClick(() => {
@@ -166,26 +143,23 @@ export struct Two{
       .backgroundColor('#FFFFFF')
       .flexGrow(1)
 
-      // 底部输入区域 - 三个组件格式完全一致
       Column({ space: 15 }) {
-        // 金额输入框 - 离左右边框60px，文字居中
         Column() {
-          TextInput({ placeholder: '金额', text: this.money.toString() })
+          TextInput({ placeholder: '金额', text: this.money === 0 ? '' : this.money.toString() })
             .width('100%')
             .height(45)
             .border({ width: 1, color: '#E0E0E0', radius: 16 })
             .textAlign(TextAlign.Center)
             .padding({ left: 15, right: 15 })
             .backgroundColor('#FFFFFF')
+            .type(InputType.Number)
             .onChange((value: string) => {
               this.money = Number(value)
             })
         }
-
         .width('100%')
         .padding({ left: 60, right: 60 })
 
-        // 备注输入框 - 离左右边框60px，文字居中
         Column() {
           TextInput({ placeholder: '备注', text: this.notes })
             .width('100%')
@@ -201,11 +175,10 @@ export struct Two{
         .width('100%')
         .padding({ left: 60, right: 60 })
 
-        // 确定按钮 - 格式与输入框完全一致，只有字体颜色不同
         Column() {
           Button('保存')
             .width('80%')
-            .margin({top:20})
+            .margin({ top: 20 })
             .onClick(() => {
               this.save()
             })
@@ -223,91 +196,25 @@ export struct Two{
     .height('100%')
   }
 
-  /**
-   * 数据增删改查
-   */
-  async  save() {
+  save() {
     if (this.selectedExpensesIndex < 0 && this.selectedIncomeIndex < 0) {
-      promptAction.showToast({
-        message: '请选择记账类型' })
+      promptAction.showToast({ message: '请选择记账类型' })
       return
     }
-
-    if (!this.money || this.notes.length <= 0) {
-      promptAction.showToast({
-        message: '请输入金额和备注' })
+    if (!this.money || this.money <= 0) {
+      promptAction.showToast({ message: '请输入正确的金额' })
       return
     }
-    await this.putData()
+    if (!this.notes || this.notes.length <= 0) {
+      promptAction.showToast({ message: '请输入备注' })
+      return
+    }
+    this.putData()
   }
 
-  async  putData() {
-    this.getData(async (success: boolean, data: string) => {
-      if (success) {
-        let list: Bill[] = JSON.parse(data) as Bill[]
-        let jsonStr = this.handleData(list)
-        kvStoreUtils.putData('keepAccountsKey', jsonStr)
-        this.getUIContext().getRouter().pushUrl({url:"pages/EntryPage"})
-      } else {
-        let jsonStr = this.handleData()
-        kvStoreUtils.putData('keepAccountsKey', jsonStr)
-        this.getUIContext().getRouter().pushUrl({url:"pages/EntryPage"})
-      }
-    })
-  }
-  // save() {
-  //   if (this.selectedExpensesIndex < 0 && this.selectedIncomeIndex < 0) {
-  //     promptAction.showToast({
-  //       message: '请选择记账类型' })
-  //     return
-  //   }
-  //
-  //   if (this.money.length <= 0 || this.notes.length <= 0) {
-  //     promptAction.showToast({
-  //       message: '请输入金额和备注' })
-  //     return
-  //   }
-  //
-  //   this.putData(() => {
-  //     //router.back()不能用
-  //     this.getUIContext().getRouter().back()
-  //
-  //   })
-  // }
-  //
-  // //
-  // putData(callBack: () => void) {
-  //   this.getData((success: boolean, data: string) => {
-  //     if (success) {
-  //       let list: Bill[] = JSON.parse(data) as Bill[]
-  //       let jsonStr = this.handleData(list)
-  //       kvStoreUtils.putData('keepAccountsKey', jsonStr)
-  //       callBack()
-  //     } else {
-  //       let jsonStr = this.handleData()
-  //       kvStoreUtils.putData('keepAccountsKey', jsonStr)
-  //       callBack()
-  //     }
-  //   })
-  // }
-
-  getData(result: (success: boolean, data: string) => void) {
-    kvStoreUtils.getData('keepAccountsKey', (data: boolean | string | number | Uint8Array) => {
-      if (data) {
-        result(true, data as string)
-      } else {
-        result(false, '')
-      }
-    }, (e: Error) => {
-      result(false, '')
-    })
-  }
-
-  //提交数据：把获得的数据存入账单列表
-
-  handleData(list: Bill[] = []): string {
-    let imageName: string = ''
-    let text: string = ''
+  async putData() {
+    let imageName = ''
+    let text = ''
     if (this.selectedExpensesIndex >= 0) {
       imageName = this.expensesList[this.selectedExpensesIndex].imageName
       text = this.expensesList[this.selectedExpensesIndex].text
@@ -315,17 +222,31 @@ export struct Two{
       imageName = this.incomeList[this.selectedIncomeIndex].imageName
       text = this.incomeList[this.selectedIncomeIndex].text
     }
-    const dateNow = new Date()
-    let bill: Bill = {
-      name: this.notes,
-      price: this.money,
-      imageName: imageName,  // 存储图片名称
-      text: text,
-      isIncome: this.selectedIncomeIndex >= 0,
-      date:`${dateNow.getFullYear()}.${dateNow.getMonth()+1}.${dateNow.getDate()}`
+
+    const d = new Date()
+    const mm = (d.getMonth() + 1).toString().padStart(2, '0')
+    const dd = d.getDate().toString().padStart(2, '0')
+    const dateStr = `${d.getFullYear()}-${mm}-${dd}`
+
+    try {
+      const reqBody: AddBillRequest = {
+        text: text,
+        name: this.notes,
+        price: this.money,
+        isIncome: this.selectedIncomeIndex >= 0,
+        imageName: imageName,
+        date: dateStr
+      }
+      const res = await HttpUtil.post<AddBillData>('/api/bills', reqBody)
+      if (res.code === 200) {
+        promptAction.showToast({ message: '记账成功' })
+        this.getUIContext().getRouter().pushUrl({ url: 'pages/EntryPage' })
+      } else {
+        promptAction.showToast({ message: res.msg || '保存失败' })
+      }
+    } catch (err) {
+      console.error('保存失败:', JSON.stringify(err))
+      promptAction.showToast({ message: '网络请求失败' })
     }
-    list.push(bill)
-    let jsonStr = JSON.stringify(list)
-    return jsonStr
   }
 }
