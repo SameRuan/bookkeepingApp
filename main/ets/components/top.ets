@@ -32,13 +32,7 @@ export struct TopBack{
   build() {
     // 顶部标题栏
     Row(){
-      // //图标
-      // Image($r('app.media.back'))
-      //   .width('38')
-      //   .height('38')
-      //   .onClick(()=>{
-      //     router.back()
-      //   })
+   
       Text(`${this.title}`)
         .fontSize(22)
         .fontWeight(FontWeight.Bold)
