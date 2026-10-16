@@ -1,27 +1,16 @@
 import { promptAction } from '@kit.ArkUI';
-import { kvStoreUtils } from '../common/KVStoreUtils';
+import { HttpUtil, LoginData, LoginRequest } from '../utils/HttpUtil';
 
-//登录页
+/*
+ * 登录页面
+ * */
 @Entry
 @Component
 struct LoginPage_First {
   @State account: string = '';
   @State password: string = '';
 
-  // 内置账号（如需真正注册/多账号，可改成从 kvStoreUtils 里读取）
-  private readonly DEFAULT_ACCOUNT: string = 'admin';
-  private readonly DEFAULT_PASSWORD: string = '123456';
-
-  async aboutToAppear() {
-    // 初始化键值型数据库（与其它页面保持一致）
-    kvStoreUtils.init(getContext());
-    kvStoreUtils.createKVStore().catch((err: Error) => {
-      console.error('KVStore初始化失败:', err);
-    });
-  }
-
-  // 登录按钮逻辑
-  doLogin() {
+  async doLogin() {
     const account = this.account.trim();
     if (account.length === 0) {
       promptAction.showToast({ message: '请输入账号' });
@@ -32,26 +21,33 @@ struct LoginPage_First {
       return;
     }
 
-    if (account === this.DEFAULT_ACCOUNT && this.password === this.DEFAULT_PASSWORD) {
-      // 记录登录状态，供其它页面使用
-      AppStorage.setOrCreate('isLogin', true);
-      AppStorage.setOrCreate('loginAccount', account);
-      promptAction.showToast({ message: '登录成功' });
-
-      // 用 UIContext 的 router，和项目里其它页面保持一致
-      this.getUIContext().getRouter().replaceUrl({ url: 'pages/EntryPage' })
-        .catch((err: Error) => {
-          console.error('跳转失败:', JSON.stringify(err));
-          promptAction.showToast({ message: '跳转失败，请检查路由配置' });
-        });
-    } else {
-      promptAction.showToast({ message: '账号或密码错误' });
+    try {
+      const reqBody: LoginRequest = {
+        username: account,
+        password: this.password
+      };
+      const res = await HttpUtil.post<LoginData>('/api/login', reqBody);
+      if (res.code === 200) {
+        AppStorage.setOrCreate('isLogin', true);
+        AppStorage.setOrCreate('loginAccount', account);
+        AppStorage.setOrCreate('token', res.data.token);
+        promptAction.showToast({ message: '登录成功' });
+        this.getUIContext().getRouter().replaceUrl({ url: 'pages/EntryPage' })
+          .catch((err: Error) => {
+            console.error('跳转失败:', JSON.stringify(err));
+            promptAction.showToast({ message: '跳转失败，请检查路由配置' });
+          });
+      } else {
+        promptAction.showToast({ message: res.msg || '账号或密码错误' });
+      }
+    } catch (err) {
+      console.error('登录失败:', JSON.stringify(err));
+      promptAction.showToast({ message: '网络请求失败，请检查后端是否启动' });
     }
   }
 
   build() {
     Column() {
-      // ---------------- 顶部 Logo + 标题 ----------------
       Column({ space: 10 }) {
         Column() {
           Image($r('app.media.shouye'))
@@ -79,9 +75,7 @@ struct LoginPage_First {
       }
       .margin({ bottom: 40 })
 
-      // ---------------- 表单卡片 ----------------
       Column({ space: 16 }) {
-        // 账号
         TextInput({ placeholder: '请输入账号', text: this.account })
           .placeholderColor('#BBBBBB')
           .fontSize(15)
@@ -95,7 +89,6 @@ struct LoginPage_First {
             this.account = value;
           })
 
-        // 密码
         TextInput({ placeholder: '请输入密码', text: this.password })
           .type(InputType.Password)
           .showPasswordIcon(true)
@@ -111,7 +104,6 @@ struct LoginPage_First {
             this.password = value;
           })
 
-        // 登录按钮
         Button('登 录')
           .width('100%')
           .height(46)
