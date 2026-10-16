@@ -1,0 +1,21 @@
+login:
+  - name: 正常登录
+    username: admin
+    password: "123456"
+    expect_code: 200
+  - name: 密码错误
+    username: admin
+    password: wrong
+    expect_code: 401
+  - name: 用户名错误
+    username: guest
+    password: "123456"
+    expect_code: 401
+  - name: 用户名为空
+    username: ""
+    password: "123456"
+    expect_code: 400
+  - name: 密码为空
+    username: admin
+    password: ""
+    expect_code: 400
