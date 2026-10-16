@@ -1,65 +1,31 @@
 import { promptAction } from '@kit.ArkUI';
-import { kvStoreUtils } from '../common/KVStoreUtils';
 import { TopBack } from '../components/top';
 import { Bill } from './Two_KeepAccounts';
+import { HttpUtil, BillDTO } from '../utils/HttpUtil';
 
+/*
+ * 查询页面
+ * */
 @Entry
 @Component
 export struct One {
-  // 原始账单数据
   @State private bills: Bill[] = [];
-  // 过滤后的账单数据
   @State private filteredBills: Bill[] = [];
-  // 查询条件
   @State private startDate: string = '';
   @State private endDate: string = '';
-  @State private selectedType: string = 'all'; // all, expense, income
+  @State private selectedType: string = 'all';
   @State private minAmount: string = '';
   @State private maxAmount: string = '';
   @State private keyword: string = '';
 
   async aboutToAppear() {
-    kvStoreUtils.init(getContext())
-    // 关键：先等 KVStore 建好，再去读数据
-    try {
-      await kvStoreUtils.createKVStore()
-    } catch (err) {
-      console.error('KVStore初始化失败:', err)
-    }
-    this.loadBills()
+    await this.filterBills()
   }
 
-  // 切回页面时也刷一次（如果 One 作为独立路由页会触发；作为子组件不触发也无所谓）
   onPageShow(): void {
-    this.loadBills()
+    this.filterBills()
   }
 
-  // 统一的读取入口
-  loadBills() {
-    this.getData((success: boolean, data: string) => {
-      if (success && data) {
-        console.log('查询页获取到的数据:', data)
-        this.bills = JSON.parse(data) as Bill[]
-      } else {
-        this.bills = []
-      }
-      this.filterBills()
-    })
-  }
-
-  getData(result: (success: boolean, data: string) => void) {
-    kvStoreUtils.getData('keepAccountsKey', (data: boolean | string | number | Uint8Array) => {
-      if (data) {
-        result(true, data as string)
-      } else {
-        result(false, '')
-      }
-    }, (e: Error) => {
-      result(false, '')
-    })
-  }
-
-  // 日期归一化：把 2024.10.9 或 2024-10-9 都转成 2024-10-09
   normalizeDate(dateStr: string): string {
     if (!dateStr) return ''
     const parts = dateStr.split(/[.\-/]/)
@@ -72,51 +38,43 @@ export struct One {
     return dateStr
   }
 
-  // 查询过滤逻辑
-  filterBills() {
-    let filtered = [...this.bills];
+  async filterBills() {
+    const params: Record<string, string> = {}
+    if (this.startDate) params.startDate = this.normalizeDate(this.startDate)
+    if (this.endDate) params.endDate = this.normalizeDate(this.endDate)
+    if (this.selectedType && this.selectedType !== 'all') params.type = this.selectedType
+    if (this.minAmount) params.minAmount = this.minAmount
+    if (this.maxAmount) params.maxAmount = this.maxAmount
+    if (this.keyword) params.keyword = this.keyword
 
-    // 日期范围过滤（归一化后比较）
-    if (this.startDate) {
-      const start = this.normalizeDate(this.startDate);
-      filtered = filtered.filter(item => this.normalizeDate(item.date) >= start);
+    try {
+      const res = await HttpUtil.get<BillDTO[]>('/api/bills/query', params)
+      if (res.code === 200) {
+        const rawList: BillDTO[] = res.data;
+        const mapped: Bill[] = [];
+        for (let i = 0; i < rawList.length; i++) {
+          const item = rawList[i];
+          const bill: Bill = {
+            text: item.text,
+            name: item.name,
+            price: Number(item.price),
+            imageName: item.imageName === undefined ? 'qt' : item.imageName,
+            isIncome: item.isIncome === 1,
+            date: (item.date === undefined ? '' : item.date).replace(/-/g, '.'),
+            createTime: item.createTime
+          };
+          mapped.push(bill);
+        }
+        this.filteredBills = mapped;
+      } else {
+        promptAction.showToast({ message: res.msg || '查询失败' })
+      }
+    } catch (err) {
+      console.error('查询失败:', JSON.stringify(err))
+      promptAction.showToast({ message: '网络请求失败' })
     }
-    if (this.endDate) {
-      const end = this.normalizeDate(this.endDate);
-      filtered = filtered.filter(item => this.normalizeDate(item.date) <= end);
-    }
-
-    // 收支类型过滤
-    if (this.selectedType === 'expense') {
-      filtered = filtered.filter(item => !item.isIncome);
-    } else if (this.selectedType === 'income') {
-      filtered = filtered.filter(item => item.isIncome);
-    }
-
-    // 金额区间过滤
-    const min = this.minAmount !== '' ? parseFloat(this.minAmount) : null;
-    const max = this.maxAmount !== '' ? parseFloat(this.maxAmount) : null;
-    if (min !== null && !isNaN(min)) {
-      filtered = filtered.filter(item => Number(item.price) >= min);
-    }
-    if (max !== null && !isNaN(max)) {
-      filtered = filtered.filter(item => Number(item.price) <= max);
-    }
-
-    // 关键词过滤
-    if (this.keyword && this.keyword.trim() !== '') {
-      const kw = this.keyword.trim().toLowerCase();
-      filtered = filtered.filter(item =>
-      (item.text && item.text.toLowerCase().includes(kw)) ||
-        (item.name && item.name.toLowerCase().includes(kw))
-      );
-    }
-
-    this.filteredBills = [...filtered];
-    console.log('过滤后数据条数:', this.filteredBills.length);
   }
 
-  // 显示日期选择器
   showDatePicker(isStart: boolean) {
     let currentDate = new Date();
     if (isStart && this.startDate) {
@@ -150,7 +108,6 @@ export struct One {
     });
   }
 
-  // 重置所有查询条件
   resetFilters() {
     this.startDate = '';
     this.endDate = '';
@@ -162,7 +119,6 @@ export struct One {
     promptAction.showToast({ message: '已重置查询条件' });
   }
 
-  // 格式化金额
   formatAmount(item: Bill): string {
     const price = Number(item.price);
     if (item.isIncome) {
@@ -172,7 +128,6 @@ export struct One {
     }
   }
 
-  // 格式化日期 (支持 2024.10.9 和 2024-10-09 -> 2024.10.9)
   formatDate(dateStr: string): string {
     const parts = dateStr.split(/[.\-/]/);
     if (parts.length === 3) {
@@ -181,12 +136,10 @@ export struct One {
     return dateStr;
   }
 
-  // 获取金额颜色
   getAmountColor(item: Bill): ResourceColor {
     return item.isIncome ? '#4CAF50' : '#FF4D4F';
   }
 
-  // 收支类型选择
   @Builder
   buildIncomeExpenseType() {
     Column() {
@@ -227,7 +180,6 @@ export struct One {
       })
   }
 
-  // 日期 + 金额 + 关键词
   @Builder
   buildAmountRange() {
     Column() {
@@ -239,7 +191,6 @@ export struct One {
           .margin({ bottom: 12 })
           .alignSelf(ItemAlign.Start)
         Row() {
-          // 开始日期
           Column() {
             Row() {
               Text(this.startDate || '请选择')
@@ -262,7 +213,6 @@ export struct One {
             .fontSize(14)
             .fontColor('#5C3B1F')
             .margin({ left: 8, right: 8 })
-          // 结束日期
           Column() {
             Row() {
               Text(this.endDate || '请选择')
@@ -306,7 +256,6 @@ export struct One {
           .textAlign(TextAlign.Center)
           .onChange((value: string) => {
             this.minAmount = value;
-            this.filterBills();
           })
         Text('-')
           .fontSize(18)
@@ -322,7 +271,6 @@ export struct One {
           .textAlign(TextAlign.Center)
           .onChange((value: string) => {
             this.maxAmount = value;
-            this.filterBills();
           })
       }
       .width('100%')
@@ -346,7 +294,6 @@ export struct One {
         .padding({ left: 16, right: 16 })
         .onChange((value: string) => {
           this.keyword = value;
-          this.filterBills();
         })
     }
     .width('100%')
@@ -356,7 +303,6 @@ export struct One {
     .margin({ bottom: 12 })
   }
 
-  // 查询和重置按钮
   @Builder
   buildQueryButton() {
     Row() {
@@ -387,7 +333,6 @@ export struct One {
     .margin({ bottom: 20 })
   }
 
-  // 表格表头
   @Builder
   buildTableHeader() {
     Row() {
@@ -420,7 +365,6 @@ export struct One {
     .backgroundColor('#FFF4E8')
   }
 
-  // 账单列表
   @Builder
   buildDataList() {
     Column() {
@@ -484,7 +428,6 @@ export struct One {
     .margin({ bottom: 12 })
   }
 
-  // 统计条数
   @Builder
   buildTotalCount() {
     Row() {
@@ -506,10 +449,9 @@ export struct One {
     .margin({ bottom: 20 })
   }
 
-  // 计算总计金额
   calculateTotal(): number {
     let total = 0;
-    this.filteredBills.forEach(item => {
+    this.filteredBills.forEach((item: Bill) => {
       const price = Number(item.price);
       if (item.isIncome) {
         total += price;
@@ -520,7 +462,6 @@ export struct One {
     return total;
   }
 
-  // 主界面
   build() {
     Column() {
       TopBack({ title: '查询' })
